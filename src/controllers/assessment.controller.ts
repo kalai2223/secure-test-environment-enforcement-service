@@ -4,6 +4,7 @@ import { resolveIP } from "../middleware/ip-resolver";
 import { getIPDetails } from "../utils/geoip";
 import { createAttempt } from "../services/attempts.service";
 import { logEvent } from "../services/event.service";
+import { findAttempt, updateAttempt } from "../services/attempts.service";
 
 export async function startAssessment(req: Request, res: Response) {
   const ip = await resolveIP(req);
@@ -39,4 +40,50 @@ export async function startAssessment(req: Request, res: Response) {
   });
 
   res.json(attempt);
+}
+
+export async function checkIP(req: any, res: any) {
+  const { attemptId } = req.params;
+
+  const attempt = await findAttempt(attemptId);
+  if (!attempt) {
+    return res.status(404).json({ message: "Attempt not found" });
+  }
+
+  const currentIP = resolveIP(req);
+  const timestamp = Date.now();
+
+  // Always log check performed
+  await logEvent({
+    eventId: uuid(),
+    type: "IP_CHECK_PERFORMED",
+    attemptId,
+    timestamp,
+    metadata: {
+      baselineIP: attempt.initialIP,
+      currentIP
+    }
+  });
+
+  // Compare with baseline
+  if (currentIP !== attempt.initialIP) {
+    attempt.ipChangeCount = (attempt.ipChangeCount || 0) + 1;
+
+    await updateAttempt(attempt);
+
+    await logEvent({
+      eventId: uuid(),
+      type: "IP_CHANGE_DETECTED",
+      attemptId,
+      timestamp,
+      metadata: {
+        oldIP: attempt.initialIP,
+        newIP: currentIP
+      }
+    });
+
+    return res.json({ changed: true, currentIP });
+  }
+
+  return res.json({ changed: false });
 }
