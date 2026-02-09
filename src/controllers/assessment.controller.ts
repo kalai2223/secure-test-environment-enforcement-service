@@ -50,10 +50,10 @@ export async function checkIP(req: any, res: any) {
     return res.status(404).json({ message: "Attempt not found" });
   }
 
-  const currentIP = resolveIP(req);
+  const currentIP = await resolveIP(req);
   const timestamp = Date.now();
 
-  // Always log check performed
+  // Always log IP check
   await logEvent({
     eventId: uuid(),
     type: "IP_CHECK_PERFORMED",
@@ -65,25 +65,59 @@ export async function checkIP(req: any, res: any) {
     }
   });
 
-  // Compare with baseline
-  if (currentIP !== attempt.initialIP) {
-    attempt.ipChangeCount = (attempt.ipChangeCount || 0) + 1;
-
-    await updateAttempt(attempt);
-
-    await logEvent({
-      eventId: uuid(),
-      type: "IP_CHANGE_DETECTED",
-      attemptId,
-      timestamp,
-      metadata: {
-        oldIP: attempt.initialIP,
-        newIP: currentIP
-      }
-    });
-
-    return res.json({ changed: true, currentIP });
+  // If no change → exit early
+  if (currentIP === attempt.initialIP) {
+    return res.json({ changed: false });
   }
 
-  return res.json({ changed: false });
+  // Get geo details for new IP
+  const newGeo = await getIPDetails(currentIP);
+
+  // Detect change
+  await logEvent({
+    eventId: uuid(),
+    type: "IP_CHANGE_DETECTED",
+    attemptId,
+    timestamp,
+    metadata: {
+      oldIP: attempt.initialIP,
+      newIP: currentIP
+    }
+  });
+
+  // Classification Logic
+  let classification = "SUSPICIOUS";
+
+  if (
+    newGeo.country === attempt.country &&
+    newGeo.region === attempt.region
+  ) {
+    classification = "LIKELY_BENIGN";
+  }
+
+  await logEvent({
+    eventId: uuid(),
+    type: "IP_CHANGE_CLASSIFIED",
+    attemptId,
+    timestamp,
+    metadata: {
+      oldIP: attempt.initialIP,
+      newIP: currentIP,
+      oldRegion: attempt.region,
+      newRegion: newGeo.region,
+      classification
+    }
+  });
+
+  // Increment counter
+  attempt.ipChangeCount = (attempt.ipChangeCount || 0) + 1;
+
+  await updateAttempt(attempt);
+
+  return res.json({
+    changed: true,
+    classification,
+    newIP: currentIP
+  });
 }
+
