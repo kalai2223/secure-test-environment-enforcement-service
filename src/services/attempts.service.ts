@@ -21,15 +21,27 @@ export async function createAttempt(attempt: any) {
 
 export async function findAttempt(attemptId: string) {
   const attempts = await readAttempts();
-  return attempts.find(a => a.attemptId === attemptId);
+  return attempts.find((a) => a.attemptId === attemptId);
 }
 
 export async function updateAttempt(updatedAttempt: any) {
   const attempts = await readAttempts();
-  const index = attempts.findIndex(a => a.attemptId === updatedAttempt.attemptId);
+  const index = attempts.findIndex(
+    (a) => a.attemptId === updatedAttempt.attemptId,
+  );
 
   if (index !== -1) {
     attempts[index] = updatedAttempt;
     await fs.writeFile(filePath, JSON.stringify(attempts, null, 2));
+  }
+}
+
+export async function getAllAttempts() {
+  try {
+    const data = await fs.readFile(filePath, "utf-8");
+    const parsed = data ? JSON.parse(data) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
 }
